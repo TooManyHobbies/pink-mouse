@@ -20,7 +20,7 @@
  * under the terms of the GNU General Public License version 2 as published by
  * the Free Software Foundation.
  *
- * Trademarks are the property of their respective owners. Add to test git.
+ * Trademarks are the property of their respective owners.
  */
 
 #include <linux/module.h>
@@ -516,6 +516,8 @@ static int synaptics_invert_y(int y)
 static void synaptics_apply_quirks(struct psmouse *psmouse,
 				   struct synaptics_device_info *info)
 {
+
+/* John
 	int i;
 
 	for (i = 0; min_max_pnpid_table[i].pnp_ids; i++) {
@@ -540,8 +542,14 @@ static void synaptics_apply_quirks(struct psmouse *psmouse,
 			     info->x_min, info->x_max,
 			     info->y_min, info->y_max);
 		break;
-	}
+	} */
+		info->x_min = 1472;
+		info->x_max = 5472;
+		info->y_min = 1408;
+		info->y_max = 4448;
+		
 }
+
 
 static bool synaptics_has_agm(struct synaptics_data *priv)
 {
@@ -773,10 +781,13 @@ static int synaptics_parse_hw_state(const u8 buf[],
 			 ((buf[3] & 0x04) >> 2));
 
 		if (synaptics_has_agm(priv) && hw->w == 2) {
+			/*printk(KERN_ALERT "Touchpad has advanced gesture mode.\n");*/
+			/*John*/
 			synaptics_parse_agm(buf, priv, hw);
 			return 1;
 		}
 
+		/*printk(KERN_ALERT "Touchpad does not have agm.\n");*/
 		hw->x = (((buf[3] & 0x10) << 8) |
 			 ((buf[1] & 0x0f) << 8) |
 			 buf[4]);
@@ -880,6 +891,7 @@ static int synaptics_parse_hw_state(const u8 buf[],
 static void synaptics_report_semi_mt_slot(struct input_dev *dev, int slot,
 					  bool active, int x, int y)
 {
+	printk(KERN_ALERT "In synaptics_report_semi_mt_slot.");
 	input_mt_slot(dev, slot);
 	input_mt_report_slot_state(dev, MT_TOOL_FINGER, active);
 	if (active) {
@@ -893,6 +905,21 @@ static void synaptics_report_semi_mt_data(struct input_dev *dev,
 					  const struct synaptics_hw_state *b,
 					  int num_fingers)
 {
+	printk(KERN_ALERT "I'm gonna return w/o sending data.");
+	return;	
+	printk(KERN_ALERT "I'm here and shouldn't be.");
+	if (abs(a->y - b->y) < 2800){
+		return;
+		/*printk(KERN_ALERT "Primary finger y value = %d\n", a->y);*/
+		/*num_fingers = 0;*/
+	}
+	if (b->y > 4000){
+		return;
+		/*printk(KERN_ALERT "Secondary finger y value = %d\n", b->y);*/
+		/*num_fingers = 0;*/	
+	}
+	
+	
 	if (num_fingers >= 2) {
 		synaptics_report_semi_mt_slot(dev, 0, true, min(a->x, b->x),
 					      min(a->y, b->y));
@@ -984,6 +1011,7 @@ static void synaptics_report_mt_data(struct psmouse *psmouse,
 	int slot[2], nsemi, i;
 
 	nsemi = clamp_val(num_fingers, 0, 2);
+	printk(KERN_ALERT "In synaptics_report_mt_data, how did I get here?");
 
 	for (i = 0; i < nsemi; i++) {
 		pos[i].x = hw[i]->x;
@@ -993,6 +1021,7 @@ static void synaptics_report_mt_data(struct psmouse *psmouse,
 	input_mt_assign_slots(dev, slot, pos, nsemi, DMAX * priv->info.x_res);
 
 	for (i = 0; i < nsemi; i++) {
+		printk(KERN_ALERT "Sending MT_POS data, x= %d, y= %d, slot= %d\n", pos[i].x, pos[i].y, i);
 		input_mt_slot(dev, slot[i]);
 		input_mt_report_slot_state(dev, MT_TOOL_FINGER, true);
 		input_report_abs(dev, ABS_MT_POSITION_X, pos[i].x);
@@ -1034,7 +1063,7 @@ static void synaptics_image_sensor_process(struct psmouse *psmouse,
 		num_fingers = 4;
 
 	/* Send resulting input events to user space */
-	synaptics_report_mt_data(psmouse, sgm, num_fingers);
+	/*synaptics_report_mt_data(psmouse, sgm, num_fingers);*/
 }
 
 static bool synaptics_has_multifinger(struct synaptics_data *priv)
@@ -1111,13 +1140,53 @@ static void synaptics_process_packet(struct psmouse *psmouse)
 	}
 
 	if (cr48_profile_sensor) {
-		synaptics_report_mt_data(psmouse, &hw, num_fingers);
+		/* synaptics_report_mt_data(psmouse, &hw, num_fingers);*/
 		return;
 	}
 
-	if (SYN_CAP_ADV_GESTURE(info->ext_cap_0c))
-		synaptics_report_semi_mt_data(dev, &hw, &priv->agm,
-					      num_fingers);
+	if (SYN_CAP_ADV_GESTURE(info->ext_cap_0c)) {
+		/* If coordinates are outside of box defined by
+		 * hardare, throw packet away.  Also, it seems
+		 * that if the two fingers are close together
+		 * as the primary leaves the box, the secondary
+		 * becomes primary, but the finger count is still
+		 * 2 and there is a jump.  I think what is happneing
+		 * is that the test below sets the number of fingers to 0
+		 * but the next packet is another advanced gesture packet?
+*/		 
+			
+		if (hw.y > 4748){ /*4748*/
+			hw.y = 4748;
+			num_fingers = 1;
+		}
+		if (hw.y < 1408){
+			hw.y = 1408;
+			num_fingers = 1;
+			
+		}
+		if (hw.x > 5472){
+			hw.x = 5472;
+			/*num_fingers = 1;
+			return;*/
+		}
+		if (hw.x < 1472){
+			hw.x = 1472;
+                	/*num_fingers = 1;
+			return;*/
+		}
+
+
+	
+	/*	if (hw.y < 4800 && hw.y > 1508){   *John*/
+		/* synaptics_report_semi_mt_data(dev, &hw, &priv->agm,
+					      num_fingers);*/
+		/* }else{
+			num_fingers = 1;
+		
+		}
+	} */
+	}
+
 
 	/* Post events
 	 * BTN_TOUCH has to be first as mousedev relies on it when doing
@@ -1127,8 +1196,12 @@ static void synaptics_process_packet(struct psmouse *psmouse)
 	if (hw.z < 25) input_report_key(dev, BTN_TOUCH, 0);
 
 	if (num_fingers > 0) {
-		input_report_abs(dev, ABS_X, hw.x);
-		input_report_abs(dev, ABS_Y, synaptics_invert_y(hw.y));
+		/*John*/
+		printk(KERN_ALERT "NEW- Post events input_report_abs being called");
+		if( (abs(priv->agm.y - hw.y) > 600) || (priv->agm.y = 0) ){
+			input_report_abs(dev, ABS_X, hw.x);
+			input_report_abs(dev, ABS_Y, synaptics_invert_y(hw.y));
+		}
 	}
 	input_report_abs(dev, ABS_PRESSURE, hw.z);
 
@@ -1136,6 +1209,7 @@ static void synaptics_process_packet(struct psmouse *psmouse)
 		input_report_abs(dev, ABS_TOOL_WIDTH, finger_width);
 
 	input_report_key(dev, BTN_TOOL_FINGER, num_fingers == 1);
+	
 	if (synaptics_has_multifinger(priv)) {
 		input_report_key(dev, BTN_TOOL_DOUBLETAP, num_fingers == 2);
 		input_report_key(dev, BTN_TOOL_TRIPLETAP, num_fingers == 3);
@@ -1222,13 +1296,26 @@ static void set_abs_position_params(struct input_dev *dev,
 				    struct synaptics_device_info *info,
 				    int x_code, int y_code)
 {
+/* John	
 	int x_min = info->x_min ?: XMIN_NOMINAL;
 	int x_max = info->x_max ?: XMAX_NOMINAL;
 	int y_min = info->y_min ?: YMIN_NOMINAL;
 	int y_max = info->y_max ?: YMAX_NOMINAL;
+
+	*/
+	int x_min = 1472;
+	int x_max = 5472;
+	int y_min = 1408;
+	int y_max = 4448;
+	
 	int fuzz = SYN_CAP_REDUCED_FILTERING(info->ext_cap_0c) ?
 			SYN_REDUCED_FILTER_FUZZ : 0;
-
+	printk(KERN_ALERT "x_min = %d\n", x_min);
+	printk(KERN_ALERT "x_max = %d\n", x_max);
+	printk(KERN_ALERT "y_min = %d\n", y_min);
+	printk(KERN_ALERT "y_max = %d\n", y_max);
+	
+	
 	input_set_abs_params(dev, x_code, x_min, x_max, fuzz, 0);
 	input_set_abs_params(dev, y_code, y_min, y_max, fuzz, 0);
 	input_abs_set_res(dev, x_code, info->x_res);
@@ -1694,6 +1781,7 @@ static int synaptics_setup_ps2(struct psmouse *psmouse,
 	if (error)
 		return error;
 
+	if (absolute_mode) printk(KERN_ALERT "Touchpad using absolute mode\n");
 	return absolute_mode ? PSMOUSE_SYNAPTICS : PSMOUSE_SYNAPTICS_RELATIVE;
 }
 
