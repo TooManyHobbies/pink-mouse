@@ -20,7 +20,7 @@
  * under the terms of the GNU General Public License version 2 as published by
  * the Free Software Foundation.
  *
- * Trademarks are the property of their respective owners.
+ * Trademarks are the property of their respective owners. Add to test git.
  */
 
 #include <linux/module.h>
